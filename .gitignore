@@ -4,3 +4,4 @@
 
 # build
 /build*/
+build/CMakeCache.txt build/CMakeFiles build/Kconfig build/app build/build.ninja build/cmake_install.cmake build/compile_commands.json build/image_preload.cmake build/modules build/zephyr build/zephyr_modules.txt build/zephyr_settings.txt
