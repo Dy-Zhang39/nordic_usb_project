@@ -13,8 +13,9 @@ import serial
 # 10. close the port
 
 # test parameters:
-pkt_sz = 128           # packet size
-test_data_sz = 100000 # total data to be sent
+pkt_sz = 512       # packet size
+num_pkts = 2000 # total data to be sent
+count = 0               # number of packets sent
 
 # signal
 ack = b'ACK'            # ack signal
@@ -36,10 +37,11 @@ if sender.read(len(ack)) == ack:
     print("receiver connected")
 
 # send data
-while total_data_sent < test_data_sz:
+while count < num_pkts:
     if wait == False:
         sender.write(data) # write a string with newline
         total_data_sent += len(data)
+        count += 1
         print("#", end="", flush=True)
         # print("data sent: " + str(total_data_sent))
         wait = True
@@ -54,7 +56,7 @@ if sender.read(pkt_sz) == done:
     print("receiver received done signal")
     # send the total data sent to the receiver as 4 bytes
     sender.write(total_data_sent.to_bytes(4, byteorder='big'))
-    print("sent data: " + str(total_data_sent)) 
+    print("sent data: " + str(total_data_sent) + " bytes")
 
 # close port
 sender.close()

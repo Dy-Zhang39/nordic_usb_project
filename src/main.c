@@ -21,9 +21,9 @@
 
 #include <usb/usb_device.h>
 #include <logging/log.h>
-LOG_MODULE_REGISTER(cdc_acm_composite, LOG_LEVEL_DBG);
+LOG_MODULE_REGISTER(cdc_acm_composite, LOG_LEVEL_INF);
 
-#define RING_BUF_SIZE	(64 * 2)
+#define RING_BUF_SIZE	(64 * 2 * 2 * 2)
 
 uint8_t buffer0[RING_BUF_SIZE];
 uint8_t buffer1[RING_BUF_SIZE];
