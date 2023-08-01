@@ -17,3 +17,6 @@ Follow the instructions in the tx.py to learn how the tester works and modify th
 
 ## Receiver
 ![image](https://github.com/Dy-Zhang39/nordic_usb_project/assets/85214707/989040d9-06c7-4e68-9d9e-22f6092d71b7)
+
+# Resource
+Pyserial: https://pyserial.readthedocs.io/en/latest/pyserial.html 
