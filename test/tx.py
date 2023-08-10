@@ -69,16 +69,16 @@ import serial
 
 class Sender:
     def __init__(self, port, baudrate, pkt_sz=512, num_pkts=2000):
-        self.port = port
-        self.baudrate = baudrate
-        self.sender = serial.Serial(port, baudrate)
-        self.ack = b'ACK'
-        self.done = b'DONE'
-        self.wait = True
-        self.total_data_sent = 0
-        self.pkt_sz = pkt_sz
-        self.num_pkts = num_pkts
-        self.data = pkt_sz * b'a' #create a data of pkt_sz bytes
+        self.port = port                                            # port name, check which port was really used
+        self.baudrate = baudrate                                    # baudrate, check which baudrate was really used
+        self.sender = serial.Serial(port, baudrate)                 # open sender port
+        self.ack = b'ACK'                                           # ack signal
+        self.done = b'DONE'                                         # done signal   
+        self.wait = True                                            # wait for receiver to send ack signal
+        self.total_data_sent = 0                                    # total data sent
+        self.pkt_sz = pkt_sz                                        # packet size
+        self.num_pkts = num_pkts                                    # total pkts to be sent
+        self.data = pkt_sz * b'a'                                   #create a data of pkt_sz bytes
 
     def connect(self):
         print("sender port: " + self.sender.port) # check which port was really used
