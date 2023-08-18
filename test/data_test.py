@@ -6,24 +6,20 @@ import serial
 import time
 
 class Sender:
-    def __init__(self, port, baudrate, pkt_sz=255, num_pkts=1):
+    def __init__(self, port, baudrate, pkt_sz=64, num_pkts=1):
         self.port = port                                            # port name, check which port was really used
         self.baudrate = baudrate                                    # baudrate, check which baudrate was really used
         self.sender = serial.Serial(port, baudrate)                 # open sender port
-        self.ack = b'ACK'                                           # ack signal
-        self.done = b'DONE'                                         # done signal   
-        self.wait = True                                            # wait for receiver to send ack signal
+        self.rd = b'RD'                                           # ack signal
+        self.wr = b'WR'                                         # done signal   
         self.total_data_sent = 0                                    # total data sent
         self.pkt_sz = pkt_sz                                        # packet size
         self.num_pkts = num_pkts                                    # total pkts to be sent
-        self.data = pkt_sz * b'a'                                   #create a data of pkt_sz bytes
+        self.data =  b'test'                                   #create a data of pkt_sz bytes
 
     def connect(self):
         print("sender port: " + self.sender.port) # check which port was really used
-        print("waiting for receiver to connect...")
-        if self.sender.read(len(self.ack)) == self.ack:
-            self.wait = False
-            print("receiver connected")
+
 
     def send_data(self, data, num_pkts):
         count = 0
@@ -54,9 +50,10 @@ class Sender:
 
     def send_WR_signal(self):
         data = b'WR0101010101010101010101010101010101001'
-        data = data.ljust(256, b'0')
+        data = data.ljust(64, b'0')
         print(data)
         self.sender.write(data)
+        self.total_data_sent += len(data)
 
     def close_port(self):
         self.sender.close()
@@ -77,7 +74,7 @@ class Receiver:
         self.receiver.write(self.ack) # let sender know that receiver is connected
         print("receiver connected")
 
-    def receive_data(self):
+    def receive_data(self) -> bytes:
         # print("receiving data...")
         start = time.time()
         while True:
@@ -98,10 +95,12 @@ class Receiver:
         self.delta_time = end - start
         print("\ntime taken: " + str(self.delta_time) + " seconds")
 
+
     def receive_data_rd(self):
         # print("receiving data...")
         data = self.receiver.read(self.pkt_sz)
         self.total_data_received += len(data)
+        return data
         # print(data)
 
     def receive_total_data_sent(self):
@@ -112,51 +111,29 @@ class Receiver:
         throughput = (self.total_data_received) * 8/ self.delta_time
         print("throughput: " + str(2*throughput/1000) + " kbps")
 
+    def save_to_file(self, data, pkt_num=0):
+        with open('data.txt', 'a') as f:
+            f.write(str(pkt_num) + ": ")
+            f.write(data.decode('utf-8'))
+            f.write('\n')
+
     def close_port(self):
         self.receiver.close()
 
-# # create receiver object and open port
-# receiver = Receiver('/dev/tty.usbmodem211203', 115200)
-
-# # wait for sender to connect
-# receiver.connect()
-
-# # receive data
-# receiver.receive_data()
-
-# # receive total data sent from sender
-# receiver.receive_total_data_sent()
-
-# # close the port
-# receiver.close_port()
 
 
 receiver = Receiver('/dev/tty.usbmodem211203', 115200)
 sender = Sender('/dev/tty.usbmodem211201', 115200)
-
-# total_pkt_rd = 0
-# start = time.time()
-# while(total_pkt_rd < 20):
-#     sender.send_rd_signal()
-#     receiver.receive_data_rd()
-#     total_pkt_rd += 1
-
-
-# end = time.time()
-# delta_time = end - start
-
-# throughput = receiver.total_data_received * 8/ delta_time
-# print("total data sent: " + str(receiver.total_data_received) + " bytes")
-# print("throughput: " + str(throughput/1000) + " kbps")
-
+time.sleep(2)
 
 
 def test_rx():
     total_pkt_rd = 0
     start = time.time()
-    while(total_pkt_rd < 2000):
+    while(total_pkt_rd < 100000):
         sender.send_rd_signal()
-        receiver.receive_data_rd()
+        data = receiver.receive_data_rd()
+        receiver.save_to_file(data, total_pkt_rd)
         total_pkt_rd += 1
 
 
@@ -168,7 +145,59 @@ def test_rx():
     print("throughput: " + str(throughput/1000) + " kbps")
 
 
-# sender.send_WR_signal()
+def test_tx():
+    total_pkt_wr = 0
+    start = time.time()
+    while(total_pkt_wr < 4000):
+        sender.send_WR_signal()
+        time.sleep(0.2)  # wait is needed to prevent receiver from dropping data, sender ideal packet szie is 64 bytes
+        total_pkt_wr += 1
+
+    end = time.time()
+    delta_time = end - start
+
+    throughput = sender.total_data_sent * 8/ delta_time
+    print("total data sent: " + str(sender.total_data_sent) + " bytes")
+    print("throughput: " + str(throughput/1000) + " kbps")
+
+
+def test_rx():
+    total_pkt_rd = 0
+    start = time.time()
+    while(total_pkt_rd < 1000):
+        sender.send_rd_signal()
+        data = receiver.receive_data_rd()
+        receiver.save_to_file(data, total_pkt_rd)
+        total_pkt_rd += 1
+
+
+    end = time.time()
+    delta_time = end - start
+
+    throughput = receiver.total_data_received * 8/ delta_time
+    print("total data received: " + str(receiver.total_data_received) + " bytes")
+    print("throughput: " + str(throughput/1000) + " kbps")
+
+
+def test_tx():
+    total_pkt_wr = 0
+    start = time.time()
+    while(total_pkt_wr < 30):
+        sender.send_WR_signal()
+        time.sleep(0.2)  # wait is needed to prevent receiver from dropping data, sender ideal packet szie is 64 bytes
+        total_pkt_wr += 1
+    
+    # time.sleep(1)
+    # sender.send_WR_signal()
+
+
+    end = time.time()
+    delta_time = end - start
+
+    throughput = sender.total_data_sent * 8/ delta_time
+    print("total data sent: " + str(sender.total_data_sent) + " bytes")
+    print("throughput: " + str(throughput/1000) + " kbps")
+
 
 test_rx()
 # test_tx()
