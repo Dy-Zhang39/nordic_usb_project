@@ -24,6 +24,8 @@
 LOG_MODULE_REGISTER(cdc_acm_composite, LOG_LEVEL_DBG);
 
 #define RING_BUF_SIZE (64 * 2 * 2 * 2)
+// tested size: 256,128
+#define DATA_SIZE 128
 
 uint8_t buffer0[RING_BUF_SIZE];
 uint8_t buffer1[RING_BUF_SIZE];
@@ -43,12 +45,10 @@ static struct serial_peer peers[] = {
 
 BUILD_ASSERT(ARRAY_SIZE(peers) >= 2, "Not enough CDC ACM instances");
 
-int once;
-
 static void consume_h2t_data(struct ring_buf *buf, size_t sz)
 {
 	size_t data_sz = ring_buf_size_get(buf);
-	if(data_sz != sz)
+	if (data_sz != sz)
 	{
 		LOG_ERR("data_sz %zu != sz %zu", data_sz, sz);
 	}
@@ -58,7 +58,7 @@ static void consume_h2t_data(struct ring_buf *buf, size_t sz)
 
 /**
  * @brief load data into T2H buffer, user should check the return value to make sure all data is loaded
- * 
+ *
  * @param buf address if the t2h buffer
  * @param data address of the data
  * @param len data size
@@ -73,7 +73,6 @@ size_t load_t2h_buf(struct ring_buf *buf, char *data, size_t len)
 	LOG_DBG("Load T2H Buffer: buffer used space: %zu", used_space);
 	LOG_DBG("Load T2H Buffer: buffer free space: %zu", free_space);
 
-
 	if (ring_buf_space_get(buf) < len)
 	{
 		LOG_INF("T2H Buffer: buffer is full, wait for the data being read and try again", len);
@@ -82,7 +81,7 @@ size_t load_t2h_buf(struct ring_buf *buf, char *data, size_t len)
 
 	wrote = ring_buf_put(buf, data, len);
 
-	if(wrote != len)
+	if (wrote != len)
 	{
 		LOG_ERR("T2H Buffer: Drop %zu bytes in loading data to T2H buffer", len - wrote);
 	}
@@ -119,10 +118,10 @@ static void interrupt_handler(const struct device *dev, void *user_data)
 			{
 				LOG_DBG("IRQ T2H Buffer: buffer used space: %zu", ring_buf_size_get(&peer->rb));
 				LOG_DBG("IRQ T2H Buffer: buffer free space： %zu", ring_buf_space_get(&peer->rb));
-				
-				while(true)
+
+				while (true)
 				{
-					if(ring_buf_size_get(&peer->rb)>255)
+					if (ring_buf_size_get(&peer->rb) > 255)
 					{
 						LOG_DBG("IRQ eanble TX, current T2H buffer size	: %zu", ring_buf_size_get(&peer->rb));
 						uart_irq_tx_enable(peer->dev);
@@ -134,7 +133,6 @@ static void interrupt_handler(const struct device *dev, void *user_data)
 
 						k_sleep(K_MSEC(100));
 					}
-
 				}
 				// uart_irq_tx_enable(peer->dev);
 			}
@@ -158,7 +156,6 @@ static void interrupt_handler(const struct device *dev, void *user_data)
 			{
 
 				LOG_ERR("Unknown command %c%c", buf[0], buf[1]);
-
 			}
 		}
 
@@ -182,13 +179,12 @@ static void interrupt_handler(const struct device *dev, void *user_data)
 				wrote = uart_fifo_fill(dev, buf, len);
 				LOG_INF("dev2 %p sent len %zu bytes to host", dev, wrote);
 
-				if(wrote < len)
+				if (wrote < len)
 				{
 					LOG_ERR("T2H Buffer: Drop %zu bytes in sneding data to host buffer", len - wrote);
 				}
 				uart_irq_tx_disable(dev);
 			}
-
 		}
 	}
 }
@@ -225,9 +221,13 @@ static void uart_line_set(const struct device *dev)
 	}
 }
 
-void main(void)
+/**
+ * @brief initalize usb device
+ *
+ * @return return true if success, otherwise return false
+ */
+int usb_init()
 {
-	once = 1;
 	uint32_t dtr = 0U;
 	int ret;
 
@@ -289,32 +289,55 @@ void main(void)
 	/* Enable rx interrupts */
 	uart_irq_rx_enable(peers[0].dev);
 	uart_irq_rx_enable(peers[1].dev);
+}
+
+/**
+ * @brief send data to the host, user should check the return value to make sure all data is sent
+ *
+ * @param data address of the data
+ * @param len data size
+ * @return return number of bytes sent
+ */
+int usb_send_data(char *data, size_t len)
+{
+	int wrote;
+	wrote = load_t2h_buf(&peers[1].rb, data, len);
+	return wrote;
+}
 
 
+/**
+ * @brief example of using usb to send data to the host
+ *
+ * @return return 0 if success, otherwise return -1
+ */
+void main(void)
+{
+	if (!usb_init())
+	{
+		LOG_ERR("USB init failed");
+	}
 
-	int data_idx = 0;
-	char data[256];
-	memset(data, '1', 256);
+	// test data
+	int data_indx = 0;
+	char data[DATA_SIZE];
+	memset(data, '1', DATA_SIZE);
 	data[8] = '0';
+
+	// loop to send data
 	while(true)
 	{
 		int wrote;
-		wrote = load_t2h_buf(&peers[1].rb,data, 256);
-		if(wrote != 0)
+		wrote = usb_send_data(&data, DATA_SIZE);
+		if(wrote != DATA_SIZE)
 		{
-			// send next data
-			data_idx++;
-			if(data_idx == 10)
-			{
-				data_idx = 0;
-			}
-			// convert data_idx to char
-
-			data[8] = data_idx + '0';
+			LOG_ERR("USB send data failed");
 		}
 		else
 		{
-			// resend the same data
+			// sned next data
+			data_indx++;
+			data[8] = data_indx + '0';
 		}
 	}
 }
