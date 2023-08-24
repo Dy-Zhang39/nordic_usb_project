@@ -45,33 +45,56 @@ BUILD_ASSERT(ARRAY_SIZE(peers) >= 2, "Not enough CDC ACM instances");
 
 int once;
 
-// static void consume_h2t_data(struct ring_buf *buf)
-// {
-// 	uint8_t temp_buf[256];
-// 	size_t len;
-// 			// get the data out from self.buffer (T2H buffer)
-// 	len = ring_buf_get(buf, temp_buf, sizeof(temp_buf));
-// 	if (!len)
-// 	{
-// 		LOG_DBG("dev1 %p H2T buffer empty", buf);
-// 	}
-// 	else
-// 	{
-// 		LOG_INF("dev1 %p H2T buffer loaded %zu bytes", buf, len);
-// 			// print the tmep_buf
-// 		for(int i = 0; i < 20; i++)
-// 		{
-// 			LOG_INF("%c", temp_buf[i]);
-// 		}
-// 	}
+static void consume_h2t_data(struct ring_buf *buf, size_t sz)
+{
+	size_t data_sz = ring_buf_size_get(buf);
+	if(data_sz != sz)
+	{
+		LOG_ERR("data_sz %zu != sz %zu", data_sz, sz);
+	}
+	// discard data and empty the buf
+	size_t rd = ring_buf_get(buf, NULL, sz);
+}
+
+/**
+ * @brief load data into T2H buffer, user should check the return value to make sure all data is loaded
+ * 
+ * @param buf address if the t2h buffer
+ * @param data address of the data
+ * @param len data size
+ * @return number of bytes wrote into the buffer
+ */
+size_t load_t2h_buf(struct ring_buf *buf, char *data, size_t len)
+{
+	size_t wrote = 0;
+	// check if buffer is full
+	size_t used_space = ring_buf_size_get(buf);
+	size_t free_space = ring_buf_space_get(buf);
+	LOG_DBG("Load T2H Buffer: buffer used space: %zu", used_space);
+	LOG_DBG("Load T2H Buffer: buffer free space: %zu", free_space);
 
 
-// }
-int count  = 1;
+	if (ring_buf_space_get(buf) < len)
+	{
+		LOG_INF("T2H Buffer: buffer is full, wait for the data being read and try again", len);
+		return 0;
+	}
+
+	wrote = ring_buf_put(buf, data, len);
+
+	if(wrote != len)
+	{
+		LOG_ERR("T2H Buffer: Drop %zu bytes in loading data to T2H buffer", len - wrote);
+	}
+
+	return wrote;
+}
+
+int count = 0;
 static void interrupt_handler(const struct device *dev, void *user_data)
 {
 	struct serial_peer *peer = user_data;
-	LOG_INF("irq called %zu", count++);
+	LOG_DBG("irq called %zu", count++);
 	while (uart_irq_update(dev) && uart_irq_is_pending(dev))
 	{
 		LOG_DBG("dev %p peer %p", dev, peer);
@@ -89,100 +112,47 @@ static void interrupt_handler(const struct device *dev, void *user_data)
 				read = 0;
 			};
 
+			LOG_INF("Command received %c%c", buf[0], buf[1]);
 
-			LOG_INF("read %zu bytes %c%c", read, buf[0], buf[1]);
-
-
-			// read command, read data from T2H buffer
+			// 'RD' read command, read data from T2H buffer
 			if (buf[0] == 'R' && buf[1] == 'D')
 			{
-				// load data into peer's(T2H) buffer
-				char data[256] = "010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010";
-				int len = strlen(data);
-				wrote = ring_buf_put(&peer->rb, data, len);
-
-				if (wrote < len)
+				LOG_DBG("IRQ T2H Buffer: buffer used space: %zu", ring_buf_size_get(&peer->rb));
+				LOG_DBG("IRQ T2H Buffer: buffer free space： %zu", ring_buf_space_get(&peer->rb));
+				
+				while(true)
 				{
-					LOG_ERR("Drop %zu bytes in loading data to T2H buffer", len - wrote);
-				}
+					if(ring_buf_size_get(&peer->rb)>255)
+					{
+						LOG_DBG("IRQ eanble TX, current T2H buffer size	: %zu", ring_buf_size_get(&peer->rb));
+						uart_irq_tx_enable(peer->dev);
+						break;
+					}
+					else
+					{
+						LOG_DBG("IRQ RD sleep... waiting data to be ready in T2H buffer, current buffer size: %zu", ring_buf_size_get(&peer->rb));
 
-				LOG_INF("T2H load: dev2 %p T2H T2H buffer loaded %zu bytes", peer->dev, wrote);
+						k_sleep(K_MSEC(100));
+					}
 
-				if (wrote)
-				{
-					// tell peer to send out the data
-					uart_irq_tx_enable(peer->dev);
 				}
+				// uart_irq_tx_enable(peer->dev);
 			}
 			else if (buf[0] == 'W' && buf[1] == 'R')
-			// write command, route data to H2T buffer
+			// 'WR' write command, write data to H2T buffer
 			{
-				LOG_INF("dev1 %p H2T buffer free space: %zu", dev, ring_buf_space_get(&peer->data->rb));
+				LOG_DBG("H2T Buffer: dev1 %p H2T buffer free space left: %zu", dev, ring_buf_space_get(&peer->data->rb));
 				wrote = ring_buf_put(&peer->data->rb, buf, read);
 
 				if (wrote < read)
 				{
-					LOG_ERR("Drop %zu bytes in writing data to H2T buffer", read - wrote);
+					LOG_ERR("H2T Buffer: Drop %zu bytes in writing data to H2T buffer", read - wrote);
 				}
 
-				LOG_INF("dev1 %p wrote %zu bytes into H2T buffer",
-						dev, wrote);
+				LOG_DBG("H2T Buffer: dev1 %p wrote %zu bytes into H2T buffer, free space left: %zu", dev, wrote, ring_buf_space_get(&peer->data->rb));
 
-				LOG_INF("dev1 %p H2T buffer free space: %zu", dev, ring_buf_space_get(&peer->data->rb));
-
-				int rd = ring_buf_get(&peer->data->rb, NULL, wrote);
-
-				LOG_INF("dev1 %p H2T buffer freed: %zu", dev, rd);
-
-				LOG_INF("dev1 %p H2T buffer free space: %zu", dev, ring_buf_space_get(&peer->data->rb));
-
-				
-
-				
-				// // if H2T buffer not full
-				// if(ring_buf_space_get(&peer->data->rb) < 256)
-				// {
-				// 	LOG_ERR("H2T buffer is full");
-				// }
-				// else
-				// {
-				// 	LOG_INF("dev1 %p H2T buffer free space: %zu", dev, ring_buf_space_get(&peer->data->rb));
-				// 	// write data to self.buffer (H2T buffer)
-				// 	wrote = ring_buf_put(&peer->data->rb, buf, read);
-				// 	if (wrote < read)
-				// 	{
-				// 		LOG_ERR("Drop %zu bytes when writing to H2T buffer", read - wrote);
-				// 	}
-
-				// 	LOG_INF("dev1 %p wrote %zu bytes into H2T buffer",
-				// 			dev, wrote);
-
-				// 	LOG_INF("dev1 %p H2T buffer free space: %zu", dev, ring_buf_space_get(&peer->data->rb));
-
-				// 	// ohter program to consume the data
-				// 	char temp_buf[256];
-				// 	read = ring_buf_get(&peer->data->rb, temp_buf, wrote);
-				// 	if (!read)
-				// 	{
-				// 		LOG_ERR("Failed to read from the H2T buffer");
-				// 	}
-				// 	else
-				// 	{
-				// 		// print buf
-				// 		for(int i = 0; i < 10; i++)
-				// 		{
-				// 			LOG_INF("%c", temp_buf[i]);
-				// 		}
-				// 		LOG_INF("dev1 %p H2T buffer cleaned %zu bytes, free buffer space: %zu", dev, read, ring_buf_space_get(&peer->data->rb));
-				// 	}
-				// 	// consume_h2t_data(&peer->data->rb);
-				// }
-				// // write data to self.buffer (H2T buffer)
-				
-				// // check if buffer is full
-
-				// // other program to read the data out
-			
+				// process data in the H2T buffer, otherwise it will be full
+				consume_h2t_data(&peer->data->rb, wrote);
 			}
 			else
 			{
@@ -190,45 +160,35 @@ static void interrupt_handler(const struct device *dev, void *user_data)
 				LOG_ERR("Unknown command %c%c", buf[0], buf[1]);
 
 			}
-
-			// wrote = ring_buf_put(rb, buf, read);
-			// if (wrote < read)
-			// {
-			// 	LOG_ERR("Drop %zu bytes", read - wrote);
-			// }
-
-			// LOG_DBG("dev %p -> dev %p send %zu bytes",
-			// 		dev, peer->dev, wrote);
-			// if (wrote)
-			// {
-			// 	uart_irq_tx_enable(peer->dev);
-			// }
 		}
 
 		if (uart_irq_tx_ready(dev))
 		{
 			uint8_t buf[256];
+			memset(buf, 'E', 256);
 			size_t wrote, len;
+
 			// get the data out from self.buffer (T2H buffer)
 			len = ring_buf_get(&peer->data->rb, buf, sizeof(buf));
 			if (!len)
 			{
+				// no data available, send all 'E(empty)' to host
+				uart_fifo_fill(dev, buf, 256);
 				LOG_DBG("dev2 %p T2H buffer empty", dev);
 				uart_irq_tx_disable(dev);
 			}
 			else
 			{
 				wrote = uart_fifo_fill(dev, buf, len);
+				LOG_INF("dev2 %p sent len %zu bytes to host", dev, wrote);
 
-				if(wrote != 255)
+				if(wrote < len)
 				{
-					LOG_ERR("dev2 %p sent len %zu bytes to host, potential data lost", dev, wrote);
+					LOG_ERR("T2H Buffer: Drop %zu bytes in sneding data to host buffer", len - wrote);
 				}
-				else
-				{
-					LOG_INF("dev2 %p sent len %zu bytes to host", dev, wrote);
-				}
+				uart_irq_tx_disable(dev);
 			}
+
 		}
 	}
 }
@@ -329,4 +289,32 @@ void main(void)
 	/* Enable rx interrupts */
 	uart_irq_rx_enable(peers[0].dev);
 	uart_irq_rx_enable(peers[1].dev);
+
+
+
+	int data_idx = 0;
+	char data[256];
+	memset(data, '1', 256);
+	data[8] = '0';
+	while(true)
+	{
+		int wrote;
+		wrote = load_t2h_buf(&peers[1].rb,data, 256);
+		if(wrote != 0)
+		{
+			// send next data
+			data_idx++;
+			if(data_idx == 10)
+			{
+				data_idx = 0;
+			}
+			// convert data_idx to char
+
+			data[8] = data_idx + '0';
+		}
+		else
+		{
+			// resend the same data
+		}
+	}
 }
