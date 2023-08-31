@@ -6,7 +6,7 @@ class Sender:
     def __init__(self, port, baudrate, pkt_sz=64, num_pkts=1):
         self.port = port                                            # port name, check which port was really used
         self.baudrate = baudrate                                    # baudrate, check which baudrate was really used
-        self.sender = serial.Serial(port, baudrate)                 # open sender port
+        self.sender = serial.Serial(port, baudrate, timeout=0.5)                 # open sender port
         self.rd_command = b'RD'                                     # read signal
         self.wr_command = b'WR'                                     # write signal   
         self.total_data_sent = 0                                    # total data sent
@@ -53,7 +53,7 @@ class Receiver:
     def __init__(self, port, baudrate):
         self.port = port                                # port
         self.baudrate = baudrate                        # baudrate
-        self.receiver = serial.Serial(port, baudrate)   # receiver serial port
+        self.receiver = serial.Serial(port, baudrate, timeout=0.5)   # receiver serial port
         # self.ack = b'ACK'                               # ack signal
         # self.done = pkt_sz * b'D'                       # done signal
         self.total_data_received = 0                    # total data received
@@ -117,17 +117,25 @@ class Receiver:
 receiver = Receiver('/dev/tty.usbmodem211203', 115200)
 sender = Sender('/dev/tty.usbmodem211201', 115200)
 time.sleep(1)
-
+ 
 
 def test_rx():
     total_pkt_rd = 0
-    start = time.time()
+    # start = time.time()
 
-    while(total_pkt_rd < 5000):
+    while(total_pkt_rd < 500):
+        if(total_pkt_rd == 1):
+            start = time.time()
+            print("receiving data...")
         sender.send_rd_signal()
         data = receiver.receive_data_rd()
-        receiver.save_to_file(data, total_pkt_rd)
-        total_pkt_rd += 1
+        if(len(data) > 0):
+            # print(data)
+            # receiver.save_to_file(data, total_pkt_rd)
+            total_pkt_rd += 1
+            # print("read data")
+        else:
+            print("waiting for data...")
 
 
     end = time.time()

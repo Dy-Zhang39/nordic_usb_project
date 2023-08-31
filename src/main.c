@@ -25,7 +25,7 @@ LOG_MODULE_REGISTER(cdc_acm_composite, LOG_LEVEL_DBG);
 
 #define RING_BUF_SIZE (64 * 2 * 2 * 2)
 // tested size: 256,128
-#define DATA_SIZE 128
+#define DATA_SIZE 256
 
 uint8_t buffer0[RING_BUF_SIZE];
 uint8_t buffer1[RING_BUF_SIZE];
@@ -45,7 +45,14 @@ static struct serial_peer peers[] = {
 
 BUILD_ASSERT(ARRAY_SIZE(peers) >= 2, "Not enough CDC ACM instances");
 
-static void consume_h2t_data(struct ring_buf *buf, size_t sz)
+/**
+ * @brief consume data in the H2T buffer, user should check the return value to make sure all data is consumed
+ * 
+ * @param buf ring buffer
+ * @param sz size of the data to be consumed
+ * @return int size of data cosumed
+ */
+static int consume_h2t_data(struct ring_buf *buf, size_t sz)
 {
 	size_t data_sz = ring_buf_size_get(buf);
 	if (data_sz != sz)
@@ -54,6 +61,8 @@ static void consume_h2t_data(struct ring_buf *buf, size_t sz)
 	}
 	// discard data and empty the buf
 	size_t rd = ring_buf_get(buf, NULL, sz);
+
+	return rd;
 }
 
 /**
@@ -64,7 +73,7 @@ static void consume_h2t_data(struct ring_buf *buf, size_t sz)
  * @param len data size
  * @return number of bytes wrote into the buffer
  */
-size_t load_t2h_buf(struct ring_buf *buf, char *data, size_t len)
+size_t load_t2h_buf(struct ring_buf *buf, const uint8_t *data, size_t len)
 {
 	size_t wrote = 0;
 	// check if buffer is full
@@ -75,7 +84,7 @@ size_t load_t2h_buf(struct ring_buf *buf, char *data, size_t len)
 
 	if (ring_buf_space_get(buf) < len)
 	{
-		LOG_INF("T2H Buffer: buffer is full, wait for the data being read and try again", len);
+		LOG_INF("T2H Buffer: buffer is full, wait for the data being read and try again");
 		return 0;
 	}
 
@@ -237,7 +246,7 @@ int usb_init()
 		{
 			LOG_ERR("CDC ACM device %s is not ready",
 					peers[idx].dev->name);
-			return;
+			return false;
 		}
 	}
 
@@ -245,7 +254,7 @@ int usb_init()
 	if (ret != 0)
 	{
 		LOG_ERR("Failed to enable USB");
-		return;
+		return false;
 	}
 
 	LOG_INF("Wait for DTR");
@@ -289,6 +298,8 @@ int usb_init()
 	/* Enable rx interrupts */
 	uart_irq_rx_enable(peers[0].dev);
 	uart_irq_rx_enable(peers[1].dev);
+
+	return true;
 }
 
 /**
@@ -298,7 +309,7 @@ int usb_init()
  * @param len data size
  * @return return number of bytes sent
  */
-int usb_send_data(char *data, size_t len)
+int usb_send_data(const uint8_t *data, size_t len)
 {
 	int wrote;
 	wrote = load_t2h_buf(&peers[1].rb, data, len);
@@ -311,16 +322,19 @@ int usb_send_data(char *data, size_t len)
  *
  * @return return 0 if success, otherwise return -1
  */
-void main(void)
+bool usb_test(void)
 {
 	if (!usb_init())
 	{
 		LOG_ERR("USB init failed");
+		return false;
 	}
+
+	LOG_INF("USB init success");
 
 	// test data
 	int data_indx = 0;
-	char data[DATA_SIZE];
+	uint8_t data[DATA_SIZE] = {0};
 	memset(data, '1', DATA_SIZE);
 	data[8] = '0';
 
@@ -328,7 +342,8 @@ void main(void)
 	while(true)
 	{
 		int wrote;
-		wrote = usb_send_data(&data, DATA_SIZE);
+		wrote = usb_send_data(data, DATA_SIZE);
+		LOG_INF("USB wrote %zu ", wrote);
 		if(wrote != DATA_SIZE)
 		{
 			LOG_ERR("USB send data failed");
@@ -337,7 +352,18 @@ void main(void)
 		{
 			// sned next data
 			data_indx++;
-			data[8] = data_indx + '0';
+			if(data_indx > 9)
+			{
+				data_indx = 0;
+			}
+			data[1] = data_indx + '0';
 		}
 	}
+
+	return true;
+}
+
+void main(void)
+{
+	usb_test();
 }
